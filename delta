@@ -1,6 +1,8 @@
 #!/bin/python3
 import os
 import sys
+import tree
+import remote
 from tree import DeltaException, list_keys, find_ctx, tree_status, cache_status, stash_file, encrypt_file, decrypt_file, init_folder
 
 # Commands
@@ -83,6 +85,56 @@ def status(args):
 		rel = os.path.relpath(f)
 		print("\t%s" % (rel if rel[0:3] == "../" else "./" + rel,))
 
+def sync(args):
+	root, ddir, key = find_ctx()
+	print("Delta root:", root)
+	loaded_tree = tree.get_tree(root)
+	if loaded_tree != None:
+		changes = list(tree.list_changes(root, loaded_tree))
+		print("Found %d changes." % len(changes))
+		if changes:
+			for i, change in enumerate(changes, 1):
+				print("%3d." % i, *change)
+				if input("Apply change? ")[0:1].lower() == "y":
+					tree.apply_change(root, change)
+					print("Applied.")
+			print("Finished changes.")
+	if tree.get_tree(root) != tree.dump_tree(root) and input("Store tree? ")[0:1].lower() == "y":
+		tree.set_tree(root, tree.dump_tree(root))
+		print("Stored.")
+
+def up(args):
+	root, ddir, key = find_ctx()
+	objects_upstream = remote.list_upstream()
+	objects_local = tree.cache_status(root)[1]
+	objects_to_upload = [object for object in objects_local if object not in objects_upstream]
+	print("Going to upload %d objects." % len(objects_to_upload))
+	for object in objects_to_upload:
+		with tree.export_object(root, object) as f:
+			print("Uploading:", object)
+			remote.upload_object(object, f)
+	print("Uploading tree...")
+	data = tree.get_tree_crypt(root, key)
+	remote.upload_object(tree.TREEFILE, data, overwrite=True)
+	print("Uploaded!")
+
+def down(args):
+	root, ddir, key = find_ctx()
+	objects_upstream = remote.list_upstream()
+	objects_local = tree.cache_status(root)[1]
+	objects_to_download = [object for object in objects_upstream if object not in objects_local]
+	print("Going to download %d objects." % len(objects_to_download))
+	for object in objects_to_download:
+		with tree.import_object(root, object) as f:
+			print("Downloading:", object)
+			remote.download_object(object, f)
+	print("Downloading tree...")
+	if remote.exists_object(tree.TREEFILE):
+		tree.set_tree_crypt(root, key, remote.download_object(tree.TREEFILE, None))
+		print("Downloaded!")
+	else:
+		print("No tree to download.")
+
 # Main
 
 if __name__ == "__main__":
@@ -99,6 +151,14 @@ if __name__ == "__main__":
 			encrypt(sys.argv[2:])
 		elif sys.argv[1] == "decrypt":
 			decrypt(sys.argv[2:])
+		elif sys.argv[1] == "sync":
+			sync(sys.argv[2:])
+		elif sys.argv[1] == "up":
+			up(sys.argv[2:])
+		elif sys.argv[1] == "down":
+			down(sys.argv[2:])
+		elif sys.argv[1] == "help":
+			print("Commands: init status stash encrypt decrypt sync up down")
 		else:
 			print("Unknown command %s" % sys.argv[1], file=sys.stderr)
 			sys.exit(1)
