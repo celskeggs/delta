@@ -1,4 +1,5 @@
 import gnupg
+import os
 import common
 
 gpg = gnupg.GPG(use_agent=True)
@@ -17,14 +18,15 @@ def has_key(key_id):
 
 
 def encrypt(file, key, output=None):
+    assert output is None or not os.path.exists(output)
     out = gpg.encrypt_file(file, [key], sign=key, armor=False, always_trust=True, output=output)
     if output is None:
         return out.data
 
 
 def decrypt(file, key, output=None):
-    assert not os.path.exists(tempfile)
-    if type(file) is str:
+    assert output is None or not os.path.exists(output)
+    if type(file) in (str, bytes):
         decrypted = gpg.decrypt(file, always_trust=True, output=output)
     else:
         decrypted = gpg.decrypt_file(file, always_trust=True, output=output)

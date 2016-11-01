@@ -120,7 +120,6 @@ def encrypt_file(root, key, object):
     print("Encrypting %s" % object)
     assert object == sha256_file(source)
     with open(source, "rb") as fin:
-        assert not os.path.exists(tempfile)
         crypto.encrypt(fin, key, output=tempfile)
     os.rename(tempfile, target)
 
