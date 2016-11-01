@@ -1,13 +1,9 @@
 import os
+import common
 import time
 import json
-import gnupg
+import crypto
 import hashlib
-
-
-class DeltaException(Exception):
-    pass
-
 
 DDIR = ".delta"
 KEYFILE = "key"
@@ -15,10 +11,6 @@ TREEFILE = "tree"
 DATADIR = "data"
 STAGEDIR = "stage"
 CRYPTDIR = "crypt"
-
-gpg = gnupg.GPG(use_agent=True)
-
-list_keys = gpg.list_keys
 
 
 def ddir_for(x):
@@ -30,15 +22,15 @@ def find_ctx(fail=True):
     while os.path.dirname(cur_dir) != cur_dir:
         if os.path.exists(ddir_for(cur_dir)):
             if os.listdir(os.path.join(ddir_for(cur_dir), STAGEDIR)):
-                raise DeltaException("Inconsistent state. Manual rescue required.")
+                raise common.DeltaException("Inconsistent state. Manual rescue required.")
             with open(os.path.join(ddir_for(cur_dir), KEYFILE), "r") as f:
                 key_id = f.readline().strip()
-            if not gpg.export_keys(key_id):
-                raise DeltaException("Key not found in keyring: %s" % key_id)
+            if not crypto.has_key(key_id):
+                raise common.DeltaException("Key not found in keyring: %s" % key_id)
             return cur_dir, ddir_for(cur_dir), key_id
         cur_dir = os.path.dirname(cur_dir)
     if fail:
-        raise DeltaException("Cannot find delta root.")
+        raise common.DeltaException("Cannot find delta root.")
     else:
         return None
 
@@ -51,7 +43,7 @@ def tree_walk(root):
     for dirpath, dirnames, filenames in os.walk(root, onerror=fail):
         if DDIR in dirnames:
             if dirpath != root:
-                raise DeltaException("Encountered %s file in subdirectory." % DDIR)
+                raise common.DeltaException("Encountered %s file in subdirectory." % DDIR)
             dirnames.remove(DDIR)
         for filename in filenames:
             yield os.path.join(dirpath, filename)
@@ -129,7 +121,7 @@ def encrypt_file(root, key, object):
     assert object == sha256_file(source)
     with open(source, "rb") as fin:
         assert not os.path.exists(tempfile)
-        gpg.encrypt_file(fin, [key], sign=key, armor=False, always_trust=True, output=tempfile)
+        crypto.encrypt(fin, key, output=tempfile)
     os.rename(tempfile, target)
 
 
@@ -140,9 +132,7 @@ def decrypt_file(root, key, object):
     assert os.path.exists(source) and not os.path.exists(target)
     print("Decrypting %s" % object)
     with open(source, "rb") as fin:
-        assert not os.path.exists(tempfile)
-        decrypted = gpg.decrypt_file(fin, always_trust=True, output=tempfile)
-    assert decrypted.fingerprint == key, "key mismatch: unexpected %s" % decrypted.fingerprint
+        crypto.decrypt(fin, key, output=tempfile)
     assert object == sha256_file(tempfile)
     os.rename(tempfile, target)
 
@@ -185,15 +175,13 @@ def set_tree(root, tree, crypt=False):
 
 def get_tree_crypt(root, key):
     with open(os.path.join(ddir_for(root), TREEFILE), "rb") as f:
-        output = gpg.encrypt_file(f, [key], sign=key, armor=False, always_trust=True)
-    return output.data
+        return crypto.encrypt(f, key)
 
 
 def set_tree_crypt(root, key, crypted):
-    output = gpg.decrypt(crypted, always_trust=True)
-    assert output.fingerprint == key, "key mismatch: unexpected %s" % output.fingerprint
+    output = crypto.decrypt(crypted, key)
     with open(os.path.join(ddir_for(root), TREEFILE), "wb") as f:
-        f.write(output.data)
+        f.write(output)
 
 
 def dump_tree(root):

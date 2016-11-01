@@ -1,0 +1,2 @@
+class DeltaException(Exception):
+    pass

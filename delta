@@ -1,38 +1,71 @@
 #!/bin/python3
 import os
 import sys
+import crypto
 import tree
+import common
 import remote
+import inspect
+
+commands = {}
+
+
+def count_args(command):
+    optional = 0
+    required = 0
+    for p in inspect.signature(command).parameters.values():
+        if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD):
+            optional += 1
+            if p.default is None:
+                required += 1
+    return required, optional + required
+
+
+def add_command(command):
+    name = command.__name__
+    min_args, max_args = count_args(command)
+
+    def checked(args):
+        args = args[1:]
+        if len(args) < min_args:
+            raise common.DeltaException("Too few arguments to %s." % name)
+        elif max_args is not None and len(args) > max_args:
+            raise common.DeltaException("Too many arguments to %s." % name)
+        else:
+            return command(*args)
+
+    commands[name] = checked
+
+
+def no_such_command(args):
+    raise common.DeltaException("Unknown command: %s" % args[0])
 
 
 # Commands
 
-def init(args):
+@add_command
+def init(key=None):
     if tree.find_ctx(fail=False) is not None:
-        raise tree.DeltaException("delta root already created.")
-    keys = tree.list_keys(True)
-    keys.sort(key=lambda x: x["fingerprint"])
-    if len(args) == 0:
-        if len(keys) == 0:
-            raise tree.DeltaException("No keys available.")
+        raise common.DeltaException("delta root already created.")
+    if key is None:
         print("Key expected. Key options:")
-        for i, key in enumerate(keys):
+        for i, key in enumerate(crypto.list_keys()):
             print("(%d) =>" % i, key["fingerprint"], key["trust"], key["length"], *key["uids"])
         print("Try again with the number.")
-        return
-    try:
-        index = int(args[0])
-    except ValueError:
-        raise tree.DeltaException("Invalid number.")
-    if index < 0 or index >= len(keys):
-        raise tree.DeltaException("Key number not available.")
-    key = keys[index]["fingerprint"]
-    print("Using key", key)
-    tree.init_folder(os.getcwd(), key)
-    print("Repo inited.")
+    else:
+        keys = crypto.list_keys()
+        try:
+            key = keys[int(args[0])]["fingerprint"]
+        except ValueError:
+            raise common.DeltaException("Invalid number.")
+        except IndexError:
+            raise common.DeltaException("Key number not available.")
+        tree.init_folder(os.getcwd(), key)
+        print("Repo inited with key", key)
 
 
-def stash(args):
+@add_command
+def stash():
     root, ddir, key = tree.find_ctx()
     print("Delta root:", root)
     link_count, unsaved = tree.tree_status(root)
@@ -44,7 +77,8 @@ def stash(args):
         print("Nothing to stash.")
 
 
-def encrypt(args):
+@add_command
+def encrypt():
     root, ddir, key = tree.find_ctx()
     print("Delta root:", root)
     cache_decrypt, cache_encrypt = tree.cache_status(root)
@@ -59,7 +93,8 @@ def encrypt(args):
         print("Nothing to encrypt.")
 
 
-def decrypt(args):
+@add_command
+def decrypt():
     root, ddir, key = tree.find_ctx()
     print("Delta root:", root)
     cache_decrypt, cache_encrypt = tree.cache_status(root)
@@ -74,7 +109,8 @@ def decrypt(args):
         print("Nothing to decrypt.")
 
 
-def status(args):
+@add_command
+def status():
     root, ddir, key = tree.find_ctx()
     print("Delta root:", root)
     print("Encryption key:", key)
@@ -90,7 +126,8 @@ def status(args):
         print("\t%s" % (rel if rel[0:3] == "../" else "./" + rel,))
 
 
-def sync(args):
+@add_command
+def sync():
     root, ddir, key = tree.find_ctx()
     print("Delta root:", root)
     loaded_tree = tree.get_tree(root)
@@ -109,7 +146,8 @@ def sync(args):
         print("Stored.")
 
 
-def up(args):
+@add_command
+def up():
     root, ddir, key = tree.find_ctx()
     objects_upstream = remote.list_upstream()
     objects_local = tree.cache_status(root)[1]
@@ -125,7 +163,8 @@ def up(args):
     print("Uploaded!")
 
 
-def down(args):
+@add_command
+def down():
     root, ddir, key = tree.find_ctx()
     objects_upstream = remote.list_upstream()
     objects_local = tree.cache_status(root)[1]
@@ -143,32 +182,15 @@ def down(args):
         print("No tree to download.")
 
 
+@add_command
+def help():
+    print("Commands:", *sorted(commands.keys()))
+
+
 # Main
 
 if __name__ == "__main__":
     try:
-        if len(sys.argv) < 2:
-            status([])
-        elif sys.argv[1] == "init":
-            init(sys.argv[2:])
-        elif sys.argv[1] == "status":
-            status(sys.argv[2:])
-        elif sys.argv[1] == "stash":
-            stash(sys.argv[2:])
-        elif sys.argv[1] == "encrypt":
-            encrypt(sys.argv[2:])
-        elif sys.argv[1] == "decrypt":
-            decrypt(sys.argv[2:])
-        elif sys.argv[1] == "sync":
-            sync(sys.argv[2:])
-        elif sys.argv[1] == "up":
-            up(sys.argv[2:])
-        elif sys.argv[1] == "down":
-            down(sys.argv[2:])
-        elif sys.argv[1] == "help":
-            print("Commands: init status stash encrypt decrypt sync up down")
-        else:
-            print("Unknown command %s" % sys.argv[1], file=sys.stderr)
-            sys.exit(1)
-    except tree.DeltaException as e:
+        commands.get(sys.argv[1] if sys.argv[1:] else "status", no_such_command)(sys.argv[1:])
+    except common.DeltaException as e:
         print("Failed:", str(e))
