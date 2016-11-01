@@ -3,20 +3,18 @@ import os
 import sys
 import tree
 import remote
-from tree import DeltaException, list_keys, find_ctx, tree_status, cache_status, stash_file, encrypt_file, decrypt_file, \
-    init_folder
 
 
 # Commands
 
 def init(args):
-    if find_ctx(fail=False) is not None:
-        raise DeltaException("delta root already created.")
-    keys = list_keys(True)
+    if tree.find_ctx(fail=False) is not None:
+        raise tree.DeltaException("delta root already created.")
+    keys = tree.list_keys(True)
     keys.sort(key=lambda x: x["fingerprint"])
     if len(args) == 0:
         if len(keys) == 0:
-            raise DeltaException("No keys available.")
+            raise tree.DeltaException("No keys available.")
         print("Key expected. Key options:")
         for i, key in enumerate(keys):
             print("(%d) =>" % i, key["fingerprint"], key["trust"], key["length"], *key["uids"])
@@ -25,36 +23,36 @@ def init(args):
     try:
         index = int(args[0])
     except ValueError:
-        raise DeltaException("Invalid number.")
+        raise tree.DeltaException("Invalid number.")
     if index < 0 or index >= len(keys):
-        raise DeltaException("Key number not available.")
+        raise tree.DeltaException("Key number not available.")
     key = keys[index]["fingerprint"]
     print("Using key", key)
-    init_folder(os.getcwd(), key)
+    tree.init_folder(os.getcwd(), key)
     print("Repo inited.")
 
 
 def stash(args):
-    root, ddir, key = find_ctx()
+    root, ddir, key = tree.find_ctx()
     print("Delta root:", root)
-    link_count, unsaved = tree_status(root)
+    link_count, unsaved = tree.tree_status(root)
     if unsaved:
         for f in unsaved:
-            stash_file(root, f)
+            tree.stash_file(root, f)
         print("Done stashing!")
     else:
         print("Nothing to stash.")
 
 
 def encrypt(args):
-    root, ddir, key = find_ctx()
+    root, ddir, key = tree.find_ctx()
     print("Delta root:", root)
-    cache_decrypt, cache_encrypt = cache_status(root)
+    cache_decrypt, cache_encrypt = tree.cache_status(root)
     found_any = False
     for object in cache_decrypt:
         if object not in cache_encrypt:
             found_any = True
-            encrypt_file(root, key, object)
+            tree.encrypt_file(root, key, object)
     if found_any:
         print("Done encrypting!")
     else:
@@ -62,14 +60,14 @@ def encrypt(args):
 
 
 def decrypt(args):
-    root, ddir, key = find_ctx()
+    root, ddir, key = tree.find_ctx()
     print("Delta root:", root)
-    cache_decrypt, cache_encrypt = cache_status(root)
+    cache_decrypt, cache_encrypt = tree.cache_status(root)
     found_any = False
     for object in cache_encrypt:
         if object not in cache_decrypt:
             found_any = True
-            decrypt_file(root, key, object)
+            tree.decrypt_file(root, key, object)
     if found_any:
         print("Done decrypting!")
     else:
@@ -77,11 +75,11 @@ def decrypt(args):
 
 
 def status(args):
-    root, ddir, key = find_ctx()
+    root, ddir, key = tree.find_ctx()
     print("Delta root:", root)
     print("Encryption key:", key)
-    link_count, unsaved = tree_status(root)
-    cache_decrypt, cache_encrypt = cache_status(root)
+    link_count, unsaved = tree.tree_status(root)
+    cache_decrypt, cache_encrypt = tree.cache_status(root)
     cache_needs_encrypt = len([x for x in cache_decrypt if x not in cache_encrypt])
     cache_needs_decrypt = len([x for x in cache_encrypt if x not in cache_decrypt])
     print("Object count:   ", len(cache_decrypt), ("\t+%d" % cache_needs_decrypt) if cache_needs_decrypt else "")
@@ -93,7 +91,7 @@ def status(args):
 
 
 def sync(args):
-    root, ddir, key = find_ctx()
+    root, ddir, key = tree.find_ctx()
     print("Delta root:", root)
     loaded_tree = tree.get_tree(root)
     if loaded_tree != None:
@@ -112,7 +110,7 @@ def sync(args):
 
 
 def up(args):
-    root, ddir, key = find_ctx()
+    root, ddir, key = tree.find_ctx()
     objects_upstream = remote.list_upstream()
     objects_local = tree.cache_status(root)[1]
     objects_to_upload = [object for object in objects_local if object not in objects_upstream]
@@ -128,7 +126,7 @@ def up(args):
 
 
 def down(args):
-    root, ddir, key = find_ctx()
+    root, ddir, key = tree.find_ctx()
     objects_upstream = remote.list_upstream()
     objects_local = tree.cache_status(root)[1]
     objects_to_download = [object for object in objects_upstream if object not in objects_local]
@@ -172,5 +170,5 @@ if __name__ == "__main__":
         else:
             print("Unknown command %s" % sys.argv[1], file=sys.stderr)
             sys.exit(1)
-    except DeltaException as e:
+    except tree.DeltaException as e:
         print("Failed:", str(e))

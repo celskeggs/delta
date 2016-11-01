@@ -191,7 +191,7 @@ def get_tree_crypt(root, key):
 
 def set_tree_crypt(root, key, crypted):
     output = gpg.decrypt(crypted, always_trust=True)
-    assert output.fingerprint == key, "key mismatch: unexpected %s" % decrypted.fingerprint
+    assert output.fingerprint == key, "key mismatch: unexpected %s" % output.fingerprint
     with open(os.path.join(ddir_for(root), TREEFILE), "wb") as f:
         f.write(output.data)
 
