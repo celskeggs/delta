@@ -10,7 +10,6 @@ KEYFILE = "key"
 TREEFILE = "tree"
 DATADIR = "data"
 STAGEDIR = "stage"
-CRYPTDIR = "crypt"
 
 
 def ddir_for(x):
@@ -66,17 +65,13 @@ def is_hex(x):
     return all(c in "0123456789abcdef" for c in x)
 
 
-def cache_status(root):
-    cache_decrypt, cache_encrypt = [], []
+def cache_status(root):  # NOTE: CRYPTDIR MOD
+    cache = []
     for object in os.listdir(os.path.join(ddir_for(root), DATADIR)):
         assert not os.path.isdir(object) and not os.path.islink(object)
         assert len(object) == SHA_LEN and is_hex(object)
-        cache_decrypt.append(object)
-    for object in os.listdir(os.path.join(ddir_for(root), CRYPTDIR)):
-        assert not os.path.isdir(object) and not os.path.islink(object)
-        assert len(object) == SHA_LEN and is_hex(object)
-        cache_encrypt.append(object)
-    return cache_decrypt, cache_encrypt
+        cache.append(object)
+    return cache
 
 
 SHA_LEN = 64  # hex digits
@@ -112,40 +107,16 @@ def stash_file(root, file):
         os.rename(tempfile, goalfile)
 
 
-def encrypt_file(root, key, object):
-    source = os.path.join(ddir_for(root), DATADIR, object)
-    target = os.path.join(ddir_for(root), CRYPTDIR, object)
-    tempfile = os.path.join(ddir_for(root), STAGEDIR, object)
-    assert os.path.exists(source) and not os.path.exists(target)
-    print("Encrypting %s" % object)
-    assert object == sha256_file(source)
-    with open(source, "rb") as fin:
-        crypto.encrypt(fin, key, output=tempfile)
-    os.rename(tempfile, target)
-
-
-def decrypt_file(root, key, object):
-    source = os.path.join(ddir_for(root), CRYPTDIR, object)
-    target = os.path.join(ddir_for(root), DATADIR, object)
-    tempfile = os.path.join(ddir_for(root), STAGEDIR, object)
-    assert os.path.exists(source) and not os.path.exists(target)
-    print("Decrypting %s" % object)
-    with open(source, "rb") as fin:
-        crypto.decrypt(fin, key, output=tempfile)
-    assert object == sha256_file(tempfile)
-    os.rename(tempfile, target)
-
-
 def export_object(root, object):
-    source = os.path.join(ddir_for(root), CRYPTDIR, object)
+    source = os.path.join(ddir_for(root), DATADIR, object)
     assert os.path.exists(source)
     return open(source, "rb")
 
 
-def import_object(root, object):
-    target = os.path.join(ddir_for(root), CRYPTDIR, object)
+def import_object_path(root, object):
+    target = os.path.join(ddir_for(root), DATADIR, object)
     assert not os.path.exists(target)
-    return open(target, "wb")
+    return target
 
 
 def init_folder(root, key):
@@ -155,7 +126,6 @@ def init_folder(root, key):
         f.write(key + "\n")
     os.mkdir(os.path.join(ddir, DATADIR))
     os.mkdir(os.path.join(ddir, STAGEDIR))
-    os.mkdir(os.path.join(ddir, CRYPTDIR))
     assert (root, ddir, key) == find_ctx()
 
 
@@ -167,20 +137,22 @@ def get_tree(root):
         return json.load(f)
 
 
-def set_tree(root, tree, crypt=False):
+def set_tree(root, tree):
     with open(os.path.join(ddir_for(root), TREEFILE), "w") as f:
         json.dump(tree, f)
 
 
-def get_tree_crypt(root, key):
-    with open(os.path.join(ddir_for(root), TREEFILE), "rb") as f:
-        return crypto.encrypt(f, key)
+def get_tree_flat(root):
+    tf = os.path.join(ddir_for(root), TREEFILE)
+    if not os.path.exists(tf):
+        return None
+    with open(tf, "rb") as f:
+        return f.read()
 
 
-def set_tree_crypt(root, key, crypted):
-    output = crypto.decrypt(crypted, key)
+def set_tree_flat(root, tree):
     with open(os.path.join(ddir_for(root), TREEFILE), "wb") as f:
-        f.write(output)
+        f.write(tree)
 
 
 def dump_tree(root):

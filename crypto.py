@@ -17,19 +17,24 @@ def has_key(key_id):
     return gpg.export_keys(key_id) is not None
 
 
-def encrypt(file, key, output=None):
-    assert output is None or not os.path.exists(output)
-    out = gpg.encrypt_file(file, [key], sign=key, armor=False, always_trust=True, output=output)
+def encrypt(file, key, output=None, overwrite=None):
+    assert output is None or not os.path.exists(output) or overwrite
+    assert key is not None
+    if type(file) in (str, bytes):
+        out = gpg.encrypt(file, [key], sign=key, armor=False, always_trust=True, output=output)
+    else:
+        out = gpg.encrypt_file(file, [key], sign=key, armor=False, always_trust=True, output=output)
     if output is None:
         return out.data
 
 
 def decrypt(file, key, output=None):
     assert output is None or not os.path.exists(output)
+    assert key is not None
     if type(file) in (str, bytes):
         decrypted = gpg.decrypt(file, always_trust=True, output=output)
     else:
         decrypted = gpg.decrypt_file(file, always_trust=True, output=output)
-    assert decrypted.fingerprint == key, "key mismatch: unexpected %s" % decrypted.fingerprint
+    assert decrypted.fingerprint == key, "key mismatch: unexpected %s instead of %s" % (decrypted.fingerprint, key)
     if output is None:
         return decrypted.data

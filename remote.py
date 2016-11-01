@@ -22,7 +22,7 @@ def list_upstream():
 
 def upload_object(object, f, overwrite=False):
     blob = get_ref().blob(object)
-    assert not blob.exists() or overwrite
+    assert not blob.exists() or overwrite  # TODO: fix race condition
     if type(f) in (str, bytes):
         blob.upload_from_string(f)
     else:
