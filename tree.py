@@ -7,7 +7,7 @@ import hashlib
 
 DDIR = ".delta"
 KEYFILE = "key"
-TREEFILE = "tree"
+LTREEFILE = "ltree"
 DATADIR = "data"
 STAGEDIR = "stage"
 
@@ -65,7 +65,7 @@ def is_hex(x):
     return all(c in "0123456789abcdef" for c in x)
 
 
-def cache_status(root):  # NOTE: CRYPTDIR MOD
+def cache_status(root):
     cache = []
     for object in os.listdir(os.path.join(ddir_for(root), DATADIR)):
         assert not os.path.isdir(object) and not os.path.islink(object)
@@ -104,7 +104,9 @@ def stash_file(root, file):
     if os.path.exists(goalfile):
         os.remove(tempfile)
     else:
+        os.chmod(os.path.join(ddir_for(root), DATADIR), 0o755)
         os.rename(tempfile, goalfile)
+        os.chmod(os.path.join(ddir_for(root), DATADIR), 0o555)
 
 
 def export_object(root, object):
@@ -130,28 +132,36 @@ def init_folder(root, key):
 
 
 def get_tree(root):
-    tf = os.path.join(ddir_for(root), TREEFILE)
+    tf = os.path.join(ddir_for(root), LTREEFILE)
     if not os.path.exists(tf):
-        return None
+        return {}
     with open(tf, "r") as f:
         return json.load(f)
 
 
 def set_tree(root, tree):
-    with open(os.path.join(ddir_for(root), TREEFILE), "w") as f:
+    with open(os.path.join(ddir_for(root), LTREEFILE), "w") as f:
         json.dump(tree, f)
 
 
+def flatten(tree):
+    return json.dumps(tree)
+
+
+def unflatten(tree):
+    return json.loads(tree if type(tree) == str else tree.decode())
+
+
 def get_tree_flat(root):
-    tf = os.path.join(ddir_for(root), TREEFILE)
+    tf = os.path.join(ddir_for(root), LTREEFILE)
     if not os.path.exists(tf):
-        return None
+        return "{}"
     with open(tf, "rb") as f:
         return f.read()
 
 
 def set_tree_flat(root, tree):
-    with open(os.path.join(ddir_for(root), TREEFILE), "wb") as f:
+    with open(os.path.join(ddir_for(root), LTREEFILE), "wb") as f:
         f.write(tree)
 
 
@@ -164,6 +174,17 @@ def dump_tree(root):
     return out
 
 
+def load_tree(root, tree):
+    count = {"blocked": 0, "insert": 0, "replace": 0, "delete": 0}
+    for change in list_changes(root, tree):
+        count[change[0]] += 1
+        if change[0] == "blocked":
+            print("Cannot load file due to existing data: %s %s %s" % change[1:])
+        else:
+            apply_change(root, change)
+    return count
+
+
 def list_changes(root, tree):
     tree2 = dump_tree(root)
     for key, (link, mtime) in tree.items():
@@ -173,7 +194,6 @@ def list_changes(root, tree):
             else:
                 yield "insert", key, link, mtime
         elif tuple(tree2[key]) != (link, mtime):
-            print("MISMATCH", link, mtime, tree2[key])
             yield "replace", key, link, mtime
     for key, (link, mtime) in tree2.items():
         if key not in tree:

@@ -65,16 +65,39 @@ def init(key_n=None):
 
 
 @add_command
-def stash():
+def pack():
     root, ddir, key = tree.find_ctx()
     print("Delta root:", root)
     link_count, unsaved = tree.tree_status(root)
     if unsaved:
         for f in unsaved:
             tree.stash_file(root, f)
-        print("Done stashing!")
+        print("Done packing!")
     else:
-        print("Nothing to stash.")
+        print("Nothing to pack.")
+    new_tree = tree.dump_tree(root)
+    if new_tree != tree.get_tree(root):
+        tree.set_tree(root, new_tree)
+
+
+@add_command
+def unpack():
+    root, ddir, key = tree.find_ctx()
+    print("Delta root:", root)
+    old_tree = tree.get_tree(root)
+    if old_tree != tree.dump_tree(root):
+        stats = tree.load_tree(root, old_tree)
+        if stats["insert"]:
+            print("Added:   ", stats["insert"])
+        if stats["delete"]:
+            print("Deleted: ", stats["delete"])
+        if stats["replace"]:
+            print("Replaced:", stats["replace"])
+        if stats["blocked"]:
+            print("Blocked: ", stats["blocked"])
+        print("Total:   ", sum(stats.values()))
+    else:
+        print("Nothing to unpack.")
 
 
 @add_command
@@ -84,65 +107,56 @@ def status():
     print("Encryption key:", key)
     link_count, unsaved = tree.tree_status(root)
     cache = tree.cache_status(root)
-    print("Object count:   ", len(cache))
-    print("Stashed count:  ", link_count, ("\t+%d" % len(unsaved)) if unsaved else "")
+    print("Object count:  ", len(cache))
+    print("Packed count:  ", link_count, ("\t+%d" % len(unsaved)) if unsaved else "")
     for f in unsaved:
         rel = os.path.relpath(f)
         print("\t%s" % (rel if rel[0:3] == "../" else "./" + rel,))
 
 
 @add_command
-def sync():
-    root, ddir, key = tree.find_ctx()
-    print("Delta root:", root)
-    loaded_tree = tree.get_tree(root)
-    if loaded_tree != None:
-        changes = list(tree.list_changes(root, loaded_tree))
-        print("Found %d changes." % len(changes))
-        if changes:
-            for i, change in enumerate(changes, 1):
-                print("%3d." % i, *change)
-                if input("Apply change? ")[0:1].lower() == "y":
-                    tree.apply_change(root, change)
-                    print("Applied.")
-            print("Finished changes.")
-    if tree.get_tree(root) != tree.dump_tree(root) and input("Store tree? ")[0:1].lower() == "y":
-        tree.set_tree(root, tree.dump_tree(root))
-        print("Stored.")
-
-
-@add_command
 def up():
     root, ddir, key = tree.find_ctx()
+    ltree = tree.get_tree(root)
+    if ltree != tree.dump_tree(root):
+        raise common.DeltaException("Local tree is dirty. Pack or unpack.")
+    print("Uploading tree...")
+    upstream.upload_object(upstream.TREENAME, tree.get_tree_flat(root), key, overwrite=True)
+    print("Tree uploaded!")
     objects_upstream = upstream.list_upstream()
     objects_local = tree.cache_status(root)
     objects_to_upload = [object for object in objects_local if object not in objects_upstream]
-    print("Going to upload %d objects." % len(objects_to_upload))
-    for object in objects_to_upload:
+    for i, object in enumerate(objects_to_upload):
         with tree.export_object(root, object) as f:
-            print("Uploading:", object)
+            print("Uploading: %s/%d" % (i + 1, len(objects_to_upload)), object)
             upstream.upload_object(object, f, key)
-    print("Uploading tree...")
-    upstream.upload_object(tree.TREEFILE, tree.get_tree_flat(root), key, overwrite=True)
-    print("Uploaded!")
+    print("Uploads complete!")
 
 
 @add_command
 def down():
     root, ddir, key = tree.find_ctx()
-    objects_upstream = upstream.list_upstream()
-    objects_local = tree.cache_status(root)
-    objects_to_download = [object for object in objects_upstream if object not in objects_local]
-    print("Going to download %d objects." % len(objects_to_download))
-    for object in objects_to_download:
-        print("Downloading:", object)
-        upstream.download_object(object, key, tree.import_object_path(root, object))
+    ltree = tree.get_tree(root)
+    if ltree != tree.dump_tree(root):
+        raise common.DeltaException("Local tree is dirty. Pack or unpack.")
     print("Downloading tree...")
-    if upstream.exists_object(tree.TREEFILE):
-        tree.set_tree_flat(root, upstream.download_object(tree.TREEFILE, key))
-        print("Downloaded!")
-    else:
-        print("No tree to download.")
+    if not upstream.exists_object(upstream.TREENAME):
+        raise common.DeltaException("No tree found upstream.")
+    rtree = tree.unflatten(upstream.download_object(upstream.TREENAME, key))
+    if rtree == ltree:
+        raise common.DeltaException("No changes from upstream.")
+    tree.set_tree(root, rtree)
+    print("Applied upstream changes to saved tree.")
+    # TODO: just fetch necessary objects
+    objects_local = tree.cache_status(root)
+    objects_upstream = upstream.list_upstream()
+    downloads_needed = [objref for objref in objects_upstream if objref not in objects_local]
+    if not downloads_needed:
+        raise common.DeltaException("No objects to download.")
+    for i, objref in enumerate(downloads_needed):
+        print("Downloading: %d/%d" % (i + 1, len(downloads_needed)), objref)
+        upstream.download_object(objref, key, tree.import_object_path(root, objref))
+    print("Downloads complete!")
 
 
 @add_command

@@ -4,6 +4,9 @@ import tempfile
 import os
 
 
+TREENAME = "tree"
+
+
 def list_upstream():
     return remote.list_upstream()
 
