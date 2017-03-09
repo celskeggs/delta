@@ -14,7 +14,9 @@ def list_upstream():
 def upload_object(object, fin, key, overwrite=False):
     assert key is not None
     with tempfile.NamedTemporaryFile() as f:
+        print("Encrypting...")
         crypto.encrypt(fin, key, output=f.name, overwrite=True)
+        print("Uploading...")
         remote.upload_object(object, f, overwrite)
 
 

@@ -170,7 +170,12 @@ def dump_tree(root):
     for filename in tree_walk(root):
         if not os.path.islink(filename):
             continue
-        out[os.path.relpath(filename, root)] = [os.readlink(filename), os.path.getmtime(filename)]
+        mtime = None
+        try:
+            mtime = os.stat(filename).st_mtime
+        except FileNotFoundError:
+            pass
+        out[os.path.relpath(filename, root)] = [os.readlink(filename), mtime]
     return out
 
 
